@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rhinometrics • Marcado de puntos</title>
+  <style>
+    :root { --bg:#0f1115; --card:#171a21; --muted:#9aa4b2; --accent:#4cc9f0; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; background:var(--bg); color:#e5e7eb; }
+    header { padding:14px 18px; background:linear-gradient(180deg,#151823,#0f1115); box-shadow: inset 0 -1px #202536; }
+    h1 { font-size:18px; margin:0; letter-spacing:0.3px; }
+    main { display:grid; grid-template-columns: 1fr 360px; gap:16px; padding:16px; }
+    @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+    .card { background:var(--card); border:1px solid #212636; border-radius:16px; overflow:hidden; }
+    .toolbar { display:flex; gap:8px; align-items:center; padding:10px; border-bottom:1px solid #212636; }
+    .toolbar label { font-size:12px; color:var(--muted); }
+    .toolbar select, .toolbar input[type="text"] { background:#0f131b; color:#e5e7eb; border:1px solid #263043; border-radius:10px; padding:8px 10px; }
+    .toolbar button { background:#0f131b; color:#e5e7eb; border:1px solid #2a344a; border-radius:10px; padding:8px 12px; cursor:pointer; }
+    .toolbar button:hover { border-color:#3a4764; }
+    .pane { padding:12px; }
+    .row { display:flex; gap:8px; align-items:center; margin:6px 0; }
+    .row code { background:#0e121a; padding:2px 6px; border-radius:6px; border:1px solid #1f2635; }
+    canvas { display:block; width:100%; height:60vh; min-height: 420px; background:#0b0e14; }
+    .legend { display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; }
+    .badge { font-size:12px; color:#d1d5db; background:#0e121a; padding:6px 8px; border:1px solid #1f2635; border-radius:999px; text-align:center; }
+    .muted { color:var(--muted); font-size:12px; }
+    .ok { color:var(--ok); }
+    .warn { color:var(--warn); }
+    .err { color:var(--err); }
+    textarea { width:100%; min-height:180px; background:#0f131b; color:#e5e7eb; border:1px solid #263043; border-radius:12px; padding:10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Rhinometrics • Marcado de puntos sobre fotografía</h1>
+  </header>
+  <main>
+    <!-- Lienzo principal -->
+    <section class="card">
+      <div class="toolbar">
+        <label>Foto:</label>
+        <input id="imgUrl" type="text" placeholder="Pega URL de la imagen o usa ?img=..." style="flex:1;" />
+        <button id="loadBtn">Cargar</button>
+        <label style="margin-left:8px;">o</label>
+        <input id="fileSel" type="file" accept="image/*" style="max-width:220px;" />
+        <label style="margin-left:8px;">Landmark:</label>
+        <select id="landmark">
+          <option value="c">c (columela)</option>
+          <option value="sn">sn (subnasale)</option>
+          <option value="ls">ls (labrale sup.)</option>
+          <option value="g">g (glabella)</option>
+          <option value="n">n' (nasion blando)</option>
+          <option value="prn">prn (pronasale)</option>
+        </select>
+        <button id="clearBtn">Limpiar puntos</button>
+      </div>
+      <div class="pane" style="min-height:60vh;">
+        <div id="status" class="muted" style="margin:6px 0 10px 0;">Carga una foto para comenzar…</div>
+        <canvas id="canvas" width="1280" height="800"></canvas>
+        <div class="muted" style="margin-top:8px;">Tip: haz clic para colocar el punto seleccionado. Arrastra un punto para ajustarlo. Rueda el ratón / pinza en móvil para zoom; arrastra para pan.</div>
+      </div>
+    </section>
+
+    <!-- Panel derecho -->
+    <aside class="card">
+      <div class="pane">
+        <h3 style="margin:0 0 10px 0;">Coordenadas normalizadas (0–100)</h3>
+        <div class="legend">
+          <div class="badge">c</div>
+          <div class="badge">sn</div>
+          <div class="badge">ls</div>
+          <div class="badge">g</div>
+          <div class="badge">n'</div>
+          <div class="badge">prn</div>
+        </div>
+        <div id="coords" class="pane" style="padding:8px 0 0 0;"></div>
+        <div class="row"><button id="copyBtn">Copiar JSON</button><span id="copyMsg" class="muted"></span></div>
+        <hr style="border-color:#202536;" />
+        <h3 style="margin:10px 0;">Ángulos (grados)</h3>
+        <div id="angles" class="pane" style="padding:0;"></div>
+        <div class="muted" style="margin:8px 0;">ANL = ∠(c–sn–ls) • ANF = ∠(g–n–prn)</div>
+        <hr style="border-color:#202536;" />
+        <h3 style="margin:10px 0;">Enviar a Glide</h3>
+        <div class="row">
+          <label class="muted">Webhook URL</label>
+        </div>
+        <input id="hook" type="text" placeholder="https://hooks.glideapp.io/tu-webhook" style="width:100%; background:#0f131b; color:#e5e7eb; border:1px solid #263043; border-radius:10px; padding:8px 10px;" />
+        <div class="row"><label class="muted">CaseID</label></div>
+        <input id="caseid" type="text" placeholder="uuid-o-id-de-tu-caso" style="width:100%; background:#0f131b; color:#e5e7eb; border:1px solid #263043; border-radius:10px; padding:8px 10px;" />
+        <div class="row"><button id="sendBtn">Enviar JSON</button><span id="sendMsg" class="muted"></span></div>
+        <hr style="border-color:#202536;" />
+        <h3 style="margin:10px 0;">Payload</h3>
+        <textarea id="payload" readonly></textarea>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    // --- Utilidades geométricas ---
+    function angleAtB(A,B,C){
+      if(!A||!B||!C) return null;
+      const abx = A.x - B.x, aby = A.y - B.y;
+      const cbx = C.x - B.x, cby = C.y - B.y;
+      const dot = abx*cbx + aby*cby;
+      const na = Math.hypot(abx,aby), nc = Math.hypot(cbx,cby);
+      if(na===0||nc===0) return null;
+      let cos = dot/(na*nc); cos = Math.min(1, Math.max(-1, cos));
+      return Math.round((Math.acos(cos)*180/Math.PI)*10)/10;
+    }
+
+    // --- Estado global ---
+    const state = {
+      img: new Image(),
+      imgLoaded: false,
+      imgUrl: '',
+      // puntos en coordenadas de imagen (px: respecto a tamaño natural)
+      points: { c:null, sn:null, ls:null, g:null, n:null, prn:null },
+      // vista
+      scale: 1,
+      panX: 0,
+      panY: 0,
+      draggingKey: null,
+      dragOffset: {x:0,y:0},
+      // canvas
+      canvas: null, ctx: null,
+      // mapeo de claves a etiquetas
+      labels: { c:'c', sn:'sn', ls:'ls', g:'g', n:"n'", prn:'prn' },
+    };
+
+    // --- Inicialización ---
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    state.canvas = canvas; state.ctx = ctx;
+
+    // Cargar imagen desde query ?img=... o input
+    const params = new URLSearchParams(location.search);
+    const initialImg = params.get('img')||'';
+    const caseParam = params.get('case')||'';
+    if(initialImg){ document.getElementById('imgUrl').value = initialImg; loadImage(initialImg); }
+    if(caseParam){ document.getElementById('caseid').value = caseParam; }
+
+    document.getElementById('loadBtn').onclick = ()=>{
+      const url = document.getElementById('imgUrl').value.trim();
+      if(url) loadImage(url);
+    };
+    // botón de demostración para verificar render sin depender de fotos
+    document.getElementById('sampleBtn').onclick = ()=>{
+      const demo = 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"640\" height=\"400\" viewBox=\"0 0 640 400\"><rect width=\"100%\" height=\"100%\" fill=\"#0b0e14\"/><circle cx=\"420\" cy=\"200\" r=\"120\" fill=\"#111a2a\" stroke=\"#2a3b57\"/><text x=\"24\" y=\"36\" fill=\"#9aa4b2\" font-family=\"ui-sans-serif\" font-size=\"16\">Imagen de prueba</text></svg>`);
+      loadImage(demo);
+    };
+    const fileSel = document.getElementById('fileSel');
+    fileSel.setAttribute('capture', 'environment');
+    fileSel.setAttribute('accept', 'image/*,.heic,.heif');
+    fileSel.addEventListener('change', (e)=>{
+      const file = e.target.files && e.target.files[0];
+      if(!file) return;
+      state.points = { c:null, sn:null, ls:null, g:null, n:null, prn:null };
+      loadImageFile(file);
+    });
+    const fileSel = document.getElementById('fileSel');
+    // permitir capturar foto en móvil (cámara)
+    fileSel.setAttribute('capture', 'environment');
+    fileSel.addEventListener('change', (e)=>{
+      const file = e.target.files && e.target.files[0];
+      if(!file) return;
+      state.points = { c:null, sn:null, ls:null, g:null, n:null, prn:null };
+      loadImageFile(file);
+    });
+    });
+
+    document.getElementById('clearBtn').onclick = ()=>{
+      state.points = { c:null, sn:null, ls:null, g:null, n:null, prn:null };
+      render(); updateSidepanel();
+    };
+
+    document.getElementById('copyBtn').onclick = ()=>{
+      const json = buildPayload();
+      navigator.clipboard.writeText(JSON.stringify(json, null, 2));
+      setMsg('copyMsg','Copiado ✅');
+    };
+
+    document.getElementById('sendBtn').onclick = async ()=>{
+      const hook = document.getElementById('hook').value.trim();
+      const caseid = document.getElementById('caseid').value.trim();
+      if(!hook){ return setMsg('sendMsg','Falta Webhook URL', true); }
+      const payload = buildPayload(caseid);
+      try{
+        const res = await fetch(hook, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        setMsg('sendMsg', res.ok ? 'Enviado ✅' : ('Error HTTP '+res.status), !res.ok);
+      }catch(e){ setMsg('sendMsg','Error de red', true); }
+    };
+
+    function setMsg(id, text, isErr=false){
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.className = 'muted' + (isErr? ' err':'' );
+      setTimeout(()=>{ el.textContent=''; el.className='muted'; }, 2500);
+      const s = document.getElementById('status');
+      if(s){ s.textContent = text; s.className = 'muted' + (isErr? ' err':'' ); }
+    }, 2000);
+    }
+
+    function loadImage(url){
+      state.imgLoaded = false; state.img = new Image();
+      state.img.crossOrigin = 'anonymous';
+      state.img.onload = ()=>{ state.imgLoaded = true; fitImage(); render(); updateSidepanel(); setMsg('copyMsg','Imagen cargada ✅'); };
+      state.img.onerror = ()=>{ setMsg('copyMsg','No se pudo cargar la imagen (CORS/HTTPS). Prueba con archivo local.', true); };
+      state.img.src = url;
+    }
+    function loadImageFile(file){
+      state.imgLoaded = false; state.img = new Image();
+      const type = (file.type||'').toLowerCase();
+      if(!type.startsWith('image/')){
+        setMsg('copyMsg','El archivo no es una imagen válida.', true); return;
+      }
+      state.img.onload = ()=>{ state.imgLoaded = true; fitImage(); render(); updateSidepanel(); setMsg('copyMsg','Imagen cargada desde archivo ✅'); };
+      state.img.onerror = ()=>{ setMsg('copyMsg','El formato no es compatible (p. ej., HEIC). Convierte a JPG/PNG.', true); };
+      const reader = new FileReader();
+      reader.onload = (e)=>{ state.img.src = e.target.result; };
+      reader.readAsDataURL(file);
+      document.getElementById('imgUrl').value = '';
+    };
+      state.img.onerror = ()=>{ alert('No se pudo cargar la imagen. Verifica la URL (debe ser https) o usa la opción de archivo.'); };
+      state.img.src = url;
+    }
+    function loadImageFile(file){
+      // Carga desde el dispositivo (móvil/desktop) sin problemas de CORS
+      state.imgLoaded = false; state.img = new Image();
+      state.img.onload = ()=>{ state.imgLoaded = true; fitImage(); render(); updateSidepanel(); };
+      state.img.onerror = ()=>{ alert('No se pudo leer el archivo.'); };
+      const url = URL.createObjectURL(file);
+      state.img.src = url;
+      document.getElementById('imgUrl').value = '';
+    };
+      state.img.onerror = ()=>{ alert('No se pudo cargar la imagen. Verifica la URL.'); };
+      state.img.src = url;
+    }
+
+    function fitImage(){
+      const rect = canvas.getBoundingClientRect();
+      const cssW = rect.width || 640;
+      const cssH = rect.height || 420;
+      canvas.width = cssW * devicePixelRatio;
+      canvas.height = cssH * devicePixelRatio;
+      const iw = state.img.naturalWidth || 1; const ih = state.img.naturalHeight || 1;
+      const s = Math.min(canvas.width/iw, canvas.height/ih);
+      state.scale = s;
+      state.panX = (canvas.width - iw*s)/2;
+      state.panY = (canvas.height - ih*s)/2;
+    }
+
+    // --- Eventos de interacción ---
+    let isPanning = false; let last = {x:0,y:0};
+
+    canvas.addEventListener('mousedown', (e)=>{
+      const p = getCanvasPos(e);
+      const imgP = screenToImage(p.x, p.y);
+      const key = hitTest(imgP.x, imgP.y);
+      if(key){ state.draggingKey = key; state.dragOffset = {x:0, y:0}; return; }
+      const lm = document.getElementById('landmark').value;
+      state.points[lm] = imgP; render(); updateSidepanel();
+    });
+
+    canvas.addEventListener('mousemove', (e)=>{
+      if(state.draggingKey){
+        const p = getCanvasPos(e);
+        const imgP = screenToImage(p.x, p.y);
+        state.points[state.draggingKey] = imgP; render(); updateSidepanel();
+      }
+    });
+
+    window.addEventListener('mouseup', ()=>{ state.draggingKey=null; });
+
+    // === SOPORTE TÁCTIL (móvil) ===
+    canvas.addEventListener('touchstart', (e)=>{
+      e.preventDefault();
+      const t = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      const p = { x: t.clientX - rect.left, y: t.clientY - rect.top };
+      const imgP = screenToImage(p.x, p.y);
+      const key = hitTest(imgP.x, imgP.y);
+      if(key){ state.draggingKey = key; return; }
+      const lm = document.getElementById('landmark').value;
+      state.points[lm] = imgP; render(); updateSidepanel();
+    }, {passive:false});
+
+    canvas.addEventListener('touchmove', (e)=>{
+      e.preventDefault();
+      if(!state.draggingKey) return;
+      const t = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      const p = { x: t.clientX - rect.left, y: t.clientY - rect.top };
+      const imgP = screenToImage(p.x, p.y);
+      state.points[state.draggingKey] = imgP; render(); updateSidepanel();
+    }, {passive:false});
+
+    canvas.addEventListener('touchend', ()=>{ state.draggingKey=null; }, {passive:false});
+
+    // Pan con botón derecho o tecla espacio
+    canvas.addEventListener('contextmenu', e=> e.preventDefault());
+    canvas.addEventListener('mousedown', (e)=>{ if(e.button===1 || e.button===2){ isPanning=true; last=getCanvasPos(e);} });
+    window.addEventListener('mousemove', (e)=>{
+      if(isPanning){
+        const p = getCanvasPos(e);
+        const dx = p.x - last.x; const dy = p.y - last.y;
+        state.panX += dx*devicePixelRatio; state.panY += dy*devicePixelRatio; last=p; render();
+      }
+    });
+    window.addEventListener('mouseup', ()=>{ isPanning=false; });
+
+    // Zoom con rueda
+    canvas.addEventListener('wheel', (e)=>{
+      e.preventDefault();
+      const factor = (e.deltaY<0) ? 1.1 : 0.9;
+      const mouse = getCanvasPos(e);
+      zoomAt(mouse.x*devicePixelRatio, mouse.y*devicePixelRatio, factor);
+    }, {passive:false});
+
+    function zoomAt(cx, cy, factor){
+      const before = screenToImage(cx, cy);
+      state.scale *= factor;
+      const after = screenToImage(cx, cy);
+      state.panX += (cx - (after.x*state.scale + state.panX));
+      state.panY += (cy - (after.y*state.scale + state.panY));
+      render();
+    }
+
+    function getCanvasPos(e){
+      const r = canvas.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+
+    function screenToImage(sx, sy){
+      // sx/sy vienen en CSS px; convertimos a px reales de canvas
+      const rect = canvas.getBoundingClientRect();
+      const x = sx*devicePixelRatio; const y = sy*devicePixelRatio;
+      return { x: (x - state.panX)/state.scale, y: (y - state.panY)/state.scale };
+    }
+
+    function imageToScreen(ix, iy){
+      // devuelve coordenadas en el canvas (px reales)
+      return { x: ix*state.scale + state.panX, y: iy*state.scale + state.panY };
+    }
+
+    function hitTest(ix, iy){
+      const radiusPx = 10*devicePixelRatio; // radio de selección en pantalla
+      for(const k of Object.keys(state.points)){
+        const P = state.points[k]; if(!P) continue;
+        const S = imageToScreen(P.x, P.y);
+        const dx = S.x - (ix*state.scale + state.panX);
+        const dy = S.y - (iy*state.scale + state.panY);
+        if(dx*dx + dy*dy <= radiusPx*radiusPx) return k;
+      }
+      return null;
+    }
+
+    // --- Dibujo ---
+    function render(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if(state.imgLoaded){ ctx.imageSmoothingEnabled = true; ctx.drawImage(state.img, state.panX, state.panY, state.img.naturalWidth*state.scale, state.img.naturalHeight*state.scale); }
+      drawPoints(); drawGuides();
+    }
+
+    function drawPoints(){
+      const colors = { c:'#00e5ff', sn:'#22c55e', ls:'#f59e0b', g:'#a78bfa', n:'#38bdf8', prn:'#ef4444' };
+      const r = 6*devicePixelRatio;
+      ctx.lineWidth = 2*devicePixelRatio;
+      for(const key of Object.keys(state.points)){
+        const P = state.points[key]; if(!P) continue;
+        const S = imageToScreen(P.x, P.y);
+        ctx.beginPath(); ctx.arc(S.x, S.y, r, 0, Math.PI*2);
+        ctx.fillStyle = colors[key]||'#fff'; ctx.fill();
+        ctx.strokeStyle = '#0b0e14'; ctx.stroke();
+        // etiqueta
+        ctx.font = `${12*devicePixelRatio}px ui-sans-serif`; ctx.fillStyle = '#e5e7eb';
+        ctx.fillText(key, S.x + 8*devicePixelRatio, S.y - 8*devicePixelRatio);
+      }
+    }
+
+    function drawGuides(){
+      // líneas de los dos triángulos (c-sn-ls) y (g-n-prn)
+      const tri1 = ['c','sn','ls'];
+      const tri2 = ['g','n','prn'];
+      ctx.lineWidth = 1.5*devicePixelRatio; ctx.setLineDash([4*devicePixelRatio, 4*devicePixelRatio]);
+      const colors = ['#4cc9f0','#f59e0b'];
+      [tri1,tri2].forEach((tri,idx)=>{
+        const A = state.points[tri[0]], B = state.points[tri[1]], C = state.points[tri[2]];
+        if(!A||!B||!C) return;
+        ctx.strokeStyle = colors[idx];
+        const As = imageToScreen(A.x,A.y), Bs = imageToScreen(B.x,B.y), Cs = imageToScreen(C.x,C.y);
+        ctx.beginPath(); ctx.moveTo(As.x,As.y); ctx.lineTo(Bs.x,Bs.y); ctx.lineTo(Cs.x,Cs.y); ctx.stroke();
+      });
+      ctx.setLineDash([]);
+    }
+
+    // --- Side panel ---
+    function updateSidepanel(){
+      const iw = state.img.naturalWidth||1, ih = state.img.naturalHeight||1;
+      function norm(P){ if(!P) return null; return { x: +(P.x/iw*100).toFixed(1), y: +(P.y/ih*100).toFixed(1) }; }
+      const NP = Object.fromEntries(Object.entries(state.points).map(([k,v])=>[k, norm(v)]));
+      const coordsDiv = document.getElementById('coords');
+      coordsDiv.innerHTML = [
+        row('c', NP.c), row('sn', NP.sn), row('ls', NP.ls),
+        row('g', NP.g), row("n'", NP.n), row('prn', NP.prn),
+      ].join('');
+
+      // Ángulos con puntos NORMALIZADOS (para consistencia)
+      const ANL = angleAtB(NP.c, NP.sn, NP.ls);
+      const ANF = angleAtB(NP.g, NP.n, NP.prn);
+      const angDiv = document.getElementById('angles');
+      const anlTxt = fmtAngle('ANL', ANL, {F:[95,105], M:[90,95]});
+      const anfTxt = fmtAngle('ANF', ANF, {ANY:[115,130]});
+      angDiv.innerHTML = `<div class="row">${anlTxt}</div><div class="row">${anfTxt}</div>`;
+
+      const payload = buildPayload(document.getElementById('caseid').value.trim());
+      document.getElementById('payload').value = JSON.stringify(payload, null, 2);
+    }
+
+    function row(name, P){
+      if(!P) return `<div class="row"><code>${name}</code><span class="muted">—</span></div>`;
+      return `<div class="row"><code>${name}</code><span> x:${P.x} • y:${P.y}</span></div>`;
+    }
+
+    function fmtAngle(label, deg, ranges){
+      if(deg==null) return `<code>${label}</code><span class="muted"> — </span>`;
+      let status = '<span class="warn">•</span>'; // neutral/indef
+      // Reglas básicas de referencia
+      let ok=false;
+      if(label==='ANL'){
+        // No sabemos sexo aquí; solo mostramos rango femenino y masculino como referencia breve
+        ok = (deg>=90 && deg<=105);
+      }else if(label==='ANF'){
+        ok = (deg>=115 && deg<=130);
+      }
+      status = ok ? `<span class="ok">✔</span>` : `<span class="err">✖</span>`;
+      return `<code>${label}</code><strong style="margin-left:6px;">${deg}°</strong> ${status}`;
+    }
+
+    function buildPayload(caseid=''){
+      const iw = state.img.naturalWidth||1, ih = state.img.naturalHeight||1;
+      const norm = (P)=> P? {x:+(P.x/iw*100).toFixed(1), y:+(P.y/ih*100).toFixed(1)} : null;
+      const NP = Object.fromEntries(Object.entries(state.points).map(([k,v])=>[k, norm(v)]));
+      const ANL = angleAtB(NP.c, NP.sn, NP.ls);
+      const ANF = angleAtB(NP.g, NP.n, NP.prn);
+      const json = {
+        case_id: caseid||null,
+        image_url: document.getElementById('imgUrl').value.trim()||null,
+        landmarks: NP, // en % 0–100
+        angles: { nasolabial: ANL, nasofrontal: ANF },
+        meta: { ts: new Date().toISOString(), app: 'RhinometricsWidget v1' }
+      };
+      return json;
+    }
+
+    // Redimensionar
+    const ro = new ResizeObserver(()=>{ if(state.imgLoaded){ fitImage(); render(); updateSidepanel(); } });
+    ro.observe(document.querySelector('section.card .pane'));
+
+    // Render inicial vacío
+    render(); updateSidepanel();
+  </script>
+</body>
+</html>
